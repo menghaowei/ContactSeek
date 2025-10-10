@@ -117,6 +117,21 @@ sg_ts_diff_sub_cp_mat = cp_diff_mat[sgRNA_start_idx:sgRNA_end_idx, tsDNA_start_i
 print(sg_ts_diff_sub_cp_mat)
 ```
 
+Output:
+
+```
+array([[ 0.  ,  0.01,  0.06,  0.04,  0.01,  0.  ,  0.01,  0.02, -0.82],
+           [ 0.  ,  0.01,  0.02,  0.01,  0.  ,  0.01,  0.03, -0.85, -0.32],
+           [ 0.  ,  0.  ,  0.02,  0.01,  0.  ,  0.01, -0.85, -0.21, -0.25],
+           [ 0.  ,  0.  ,  0.01,  0.01,  0.  , -0.92, -0.16, -0.23,  0.45],
+           [ 0.  ,  0.01,  0.02,  0.02, -0.93, -0.16, -0.17,  0.63,  0.  ],
+           [ 0.  ,  0.01,  0.04, -0.9 , -0.29, -0.16,  0.68,  0.01,  0.  ],
+           [ 0.01,  0.01, -0.88, -0.88, -0.23,  0.62,  0.  ,  0.  ,  0.  ],
+           [ 0.17, -0.69, -0.83, -0.78,  0.28,  0.  ,  0.  ,  0.  ,  0.  ],
+           [-0.02, -0.39, -0.78,  0.02,  0.  ,  0.  ,  0.  ,  0.  ,  0.  ],
+           [-0.02, -0.58,  0.03,  0.  ,  0.  ,  0.  ,  0.  ,  0.  ,  0.  ]])
+```
+
 ## 3. Top-N Contact Extraction Strategy
 
 ContactSeek includes a "Top-N" strategy to efficiently extract the most significant contact probability for each protein residue with a nucleic acid target. This is useful for feature engineering in downstream analysis.
