@@ -134,35 +134,207 @@ array([[ 0.  ,  0.01,  0.06,  0.04,  0.01,  0.  ,  0.01,  0.02, -0.82],
 
 ## 3. Top-N Contact Extraction Strategy
 
-ContactSeek includes a "Top-N" strategy to efficiently extract the most significant contact probability for each protein residue with a nucleic acid target. This is useful for feature engineering in downstream analysis.
+ContactSeek includes a "Top-N" strategy to efficiently extract the most significant contact probabilities for each protein residue with nucleic acid targets. This is useful for feature engineering in downstream analysis.
 
-The function `query_resi_to_nuc_contact_top_n` takes on-target and off-target CP matrices and returns a dictionary containing the top N contacts.
+The function `query_cp_with_top_n` takes an input CP matrix, a list of residue indices, query regions, and an optional reference CP matrix, then returns a dictionary containing the top N contacts.
 
 ```Python
-from ContactSeek.ContactExtraction import query_resi_to_nuc_contact_top_n
+from ContactSeek.ContactExtraction import query_cp_with_top_n
+from ContactSeek.Sequence import SEQ_AA_DICT
+```
 
-# (on_cp_mat and off_cp_mat are loaded as shown in the previous section)
+### 3.1 Extraction for Cas9 Complex
 
-cp_info_dict = query_resi_to_nuc_contact_top_n(
-    on_array=on_cp_mat,
-    off_array=off_cp_mat,
-    query_idx_list=[(1368, 1391)], # Example: query region for nucleic acids
+For complexes with both on-target and off-target predictions, the function computes ΔCP by accepting a reference array.
+
+```Python
+on_json_filename = "./data/spcas9_abe8e_on_af3__confidences.json"
+off_json_filename = "./data/spcas9_abe8e_off_af3__confidences.json"
+
+# Load json as numpy array for on-target
+with open(on_json_filename, "r") as on_af3_j_file:
+    on_af3_json = json.load(on_af3_j_file)
+    on_cp_mat = np.array(on_af3_json["contact_probs"])
+
+# Load json as numpy array for off-target
+with open(off_json_filename, "r") as off_af3_j_file:
+    off_af3_json = json.load(off_af3_j_file)
+    off_cp_mat = np.array(off_af3_json["contact_probs"])
+
+# Define query regions for nucleic acids
+query_region_list = [
+    (1368, 1378), # sgRNA 5' side
+    (1378, 1391), # sgRNA 3' side
+    (1491, 1506), # tsDNA 5' side
+    (1478, 1491), # tsDNA 3' side
+    (1516, 1531), # ntsDNA 5' side
+    (1531, 1544)  # ntsDNA 3' side
+]
+
+# Set query residue index (1-based index) e.g. SpCas9, from 1 to 1368
+resi_idx_list = [i for i in range(1, len(SEQ_AA_DICT["spcas9"]) + 1)]
+
+# Extract top-N contacts with reference (on-target) array
+cp_info_dict = query_cp_with_top_n(
+    input_array=off_cp_mat,
+    from_resi_idx_list=resi_idx_list,
+    query_idx_list=query_region_list,
     top_n=3,
-    cas_length=1368
+    ref_array=on_cp_mat
 )
 
 # The output dictionary contains several keys
-# Shape of top N on-target probabilities for each of the 1368 residues
-print("Top N on-target shape:", cp_info_dict["top_n_on_prob"].shape)
-# Expected output: (1368, 3)
+print("Top N input (off-target) shape:", cp_info_dict["top_n_input_prob"].shape)
+# Expected output: (1368, 18)
 
-# Shape of top N off-target probabilities
-print("Top N off-target shape:", cp_info_dict["top_n_off_prob"].shape)
-# Expected output: (1368, 3)
+print("Top N diff shape:", cp_info_dict["top_n_diff_prob"].shape)
+# Expected output: (1368, 18)
 
-# Shape of the maximum contact probability difference for each residue
-print("Max CP difference shape:", cp_info_dict["diff_prob"].shape)
-# Expected output: (1368,)
+print("Top N ref (on-target) shape:", cp_info_dict["top_n_ref_prob"].shape)
+# Expected output: (1368, 18)
+```
+
+### 3.2 Extraction for TadA8e-RNA and A3A-RNA Complexes
+
+Since the TadA8e-RNA and A3A-RNA binary complexes do not have a specific 'on-target' site, we extract only the CP value rather than the ΔCP by setting `ref_array=None`.
+
+**TadA8e-dimer-RNA Complex:**
+
+The TadA8e-dimer-RNA complex consists of two protein chains (A and B) and one RNA chain (C). Both protein chains A and B are capable of using the RNA as a substrate.
+
+```Python
+off_json_filename = "./data/tada8e_dimer__rna_off_confidences.json"
+
+# Load json as numpy array for off-target
+with open(off_json_filename, "r") as off_af3_j_file:
+    off_af3_json = json.load(off_af3_j_file)
+    off_cp_mat = np.array(off_af3_json["contact_probs"])
+
+# TadA8e-dimer + 9nt RNA
+# token num = 167 * 2 + 9 = 343
+print(off_cp_mat.shape)
+# Expected output: (343, 343)
+
+TadA8e_len = len(SEQ_AA_DICT["tada8e"])
+
+# Chain A (TadA8e) vs Chain C (RNA)
+resi_idx_list = list(range(1, TadA8e_len + 1))
+query_region_list = [(TadA8e_len * 2, TadA8e_len * 2 + 9)]
+
+# Chain B (TadA8e) vs Chain C (RNA)
+resi_idx_list = list(range(TadA8e_len + 1, TadA8e_len + TadA8e_len + 1))
+query_region_list = [(TadA8e_len * 2, TadA8e_len * 2 + 9)]
+
+# Extract top-N contacts without reference array
+TadA8e_cp_info_dict = query_cp_with_top_n(
+    input_array=off_cp_mat,
+    from_resi_idx_list=resi_idx_list,
+    query_idx_list=query_region_list,
+    top_n=3,
+    ref_array=None
+)
+
+# Only CP values are available (no diff)
+print("Top N input shape:", TadA8e_cp_info_dict["top_n_input_prob"].shape)
+# Expected output: (167, 3)
+```
+
+**A3A-RNA Complex:**
+
+```Python
+off_json_filename = "./data/apobec3a_wt__rna_off_confidences.json"
+
+# Load json as numpy array for off-target
+with open(off_json_filename, "r") as off_af3_j_file:
+    off_af3_json = json.load(off_af3_j_file)
+    off_cp_mat = np.array(off_af3_json["contact_probs"])
+
+# Get index for A3A
+A3A_len = len(SEQ_AA_DICT["apobec3a"])
+resi_idx_list = list(range(1, A3A_len + 1))
+query_region_list = [
+    (199, 205),  # RNA 5' side
+    (205, 210),  # RNA U-shape
+    (210, 216)   # RNA 3' side
+]
+
+A3A_cp_info_dict = query_cp_with_top_n(
+    input_array=off_cp_mat,
+    from_resi_idx_list=resi_idx_list,
+    query_idx_list=query_region_list,
+    top_n=3,
+    ref_array=None
+)
+
+print("Top N input shape:", A3A_cp_info_dict["top_n_input_prob"].shape)
+# Expected output: (199, 9)
+
+# Near A3A catalytic activity site (H70)
+print(A3A_cp_info_dict["top_n_input_prob"][67:75,])
+```
+
+Output:
+
+```
+array([[0.  , 0.  , 0.  , 0.01, 0.  , 0.  , 0.  , 0.  , 0.  ],
+       [0.  , 0.  , 0.  , 0.03, 0.  , 0.  , 0.  , 0.  , 0.  ],
+       [0.  , 0.  , 0.  , 1.  , 0.  , 0.  , 0.  , 0.  , 0.  ],
+       [0.  , 0.  , 0.  , 0.99, 0.  , 0.  , 0.  , 0.  , 0.  ],
+       [0.  , 0.  , 0.  , 0.97, 0.  , 0.  , 0.  , 0.  , 0.  ],
+       [0.  , 0.  , 0.  , 0.05, 0.  , 0.  , 0.  , 0.  , 0.  ],
+       [0.  , 0.  , 0.  , 0.  , 0.  , 0.  , 0.  , 0.  , 0.  ],
+       [0.  , 0.  , 0.  , 0.  , 0.  , 0.  , 0.  , 0.  , 0.  ]])
+```
+
+### 3.3 Extraction for AI-Designed DNA Binding Proteins
+
+We utilize AF3 to predict the structures of AI-designed DNA-binding proteins (DBPs) in complex with their target DNA, including sequences with mismatches. The DBP sequences are derived from the study by Glasscock et al. (https://doi.org/10.1038/s41594-025-01669-4). Based on these complex predictions, we extracted and analyzed the Contact Probability (CP) values.
+
+```Python
+on_json_filename = "./data/dbp__dbp035__b_confidences.json"
+off_json_filename = "./data/dbp__dbp035__b__mis1__12__c_t_confidences.json"
+
+# Load json as numpy array for on-target
+with open(on_json_filename, "r") as on_af3_j_file:
+    on_af3_json = json.load(on_af3_j_file)
+    on_cp_mat = np.array(on_af3_json["contact_probs"])
+
+# Load json as numpy array for off-target
+with open(off_json_filename, "r") as off_af3_j_file:
+    off_af3_json = json.load(off_af3_j_file)
+    off_cp_mat = np.array(off_af3_json["contact_probs"])
+
+DBP_len = len(SEQ_AA_DICT["dbp35"])
+resi_idx_list = list(range(1, DBP_len + 1))
+query_region_list = [
+    (63, 78), # DNA forward strand
+    (78, 93)  # DNA reverse strand
+]
+
+DBP_cp_info_dict = query_cp_with_top_n(
+    input_array=off_cp_mat,
+    from_resi_idx_list=resi_idx_list,
+    query_idx_list=query_region_list,
+    top_n=3,
+    ref_array=on_cp_mat
+)
+
+# Near designed DNA binding helix region
+print(DBP_cp_info_dict["top_n_diff_prob"][26:35,])
+```
+
+Output:
+
+```
+array([[-0.38, -0.33, -0.03,  0.03,  0.02,  0.01],
+       [ 0.  ,  0.01,  0.  ,  0.01,  0.02,  0.01],
+       [-0.41, -0.46, -0.1 , -0.12,  0.01,  0.05],
+       [-0.34, -0.06,  0.02,  0.01,  0.01,  0.01],
+       [ 0.  ,  0.  ,  0.  ,  0.  ,  0.  ,  0.  ],
+       [ 0.05,  0.04,  0.01, -0.39, -0.05, -0.01],
+       [ 0.01,  0.01,  0.01,  0.01,  0.01,  0.01],
+       [ 0.  ,  0.  ,  0.  ,  0.  ,  0.  ,  0.  ],
+       [ 0.  ,  0.  ,  0.  ,  0.  ,  0.  ,  0.  ]])
 ```
 
 ## 4. Full Pipeline Demonstration
@@ -285,7 +457,7 @@ print(ccr_df.iloc[:5,])
 0         1      74        10  1030-1039   0.035906    0.943673  1030G,1031K,1032A,1033T,1034A,1035K,1036Y,1037...
 1         2      73         7  1023-1029   0.033600    0.892673        1023A,1024K,1025S,1026E,1027Q,1028E,1029I
 2         3      72         9  1014-1022   0.029949    0.780605  1014K,1015V,1016Y,1017D,1018V,1019R,1020K,1021...
-3         4      62        10   911-920    0.029333    0.760121    911L,912D,913K,914A,915G,916F,917I,918K,919R,920Q
+3         4      62        10   911-920    0.029333    0.760121    911L,912D,913K,914A,915G,916F,917I,918R,919R,920Q
 4         5      76         7  1050-1058   0.028439    0.730577    1050I,1051T,1052L,1053A,1054N,1055G,1056E,1057...
 ```
 
