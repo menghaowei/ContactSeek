@@ -1,4 +1,4 @@
-# ContactSeek
+# ContactSeek ![Visitors](https://visitor-badge.laobi.icu/badge?page_id=menghaowei.ContactSeek)
 
 ContactSeek is a computational framework for identifying and ranking protein-nucleotide contact regions using AlphaFold3 contact probability matrices.
 
