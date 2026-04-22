@@ -1,4 +1,4 @@
-# ContactSeek ![Visitors](https://visitor-badge.laobi.icu/badge?page_id=menghaowei.ContactSeek)
+# ContactSeek
 
 ContactSeek is a computational framework for identifying and ranking protein-nucleotide contact regions using AlphaFold3 contact probability matrices.
 
@@ -15,7 +15,7 @@ micromamba create -n ContactSeek dill numpy pandas matplotlib scipy scikit-learn
 This method uses the `environment_ContactSeek.yaml` file to create the Conda environment. This will not work for MacOS.
 
 ```bash
-conda env create -f environment_ContactSeek.yaml -n ContactSeek`
+conda env create -f environment_ContactSeek.yaml -n ContactSeek
 ```
 
 ## 2. Loading AlphaFold3 Contact Probability Matrix
@@ -196,7 +196,7 @@ print("Top N ref (on-target) shape:", cp_info_dict["top_n_ref_prob"].shape)
 
 ### 3.2 Extraction for TadA8e-RNA and A3A-RNA Complexes
 
-Since the TadA8e-RNA and A3A-RNA binary complexes do not have a specific 'on-target' site, we extract only the CP value rather than the ΔCP by setting `ref_array=None`.
+Since the TadA8e-RNA and A3A-RNA binary complexes do not have a specific "on-target" site, we extract only the CP values rather than the ΔCP by setting `ref_array=None`.
 
 **TadA8e-dimer-RNA Complex:**
 
@@ -357,25 +357,27 @@ data_dict = {
 }
 ```
 
-All values in the dictionary are lists of the same length (full off-target list), where each element corresponds to a single data sample. 
+All values in the dictionary are lists of the same length (full off-target list), where each element corresponds to a single data sample.
 
 Here is a detailed description of each key:
 
 - `cp_diff_cas_nuc`: This feature matrix represents the change in contact probability between off-target and on-target predictions.
-  
+
   - For each amino acid, the value in this matrix is the absolute maximum of the contact probability difference (off-target vs. on-target) with one of these six regions.
-  
+
   - The resulting dimension is `N x 6`, where N is the number of amino acids in the protein (e.g., 1368 for SpCas9, 1228 for LbCpf1).
 
 - `cp_raw_cas_nuc`: This matrix contains the raw contact probabilities for the **off-target** predictions.
-  
+
   - For each of the six nucleic acid regions defined above, the top 3 contact probability values for each amino acid are recorded.
-  
+
   - This results in a feature matrix of dimension `N x 18` (N amino acids x 6 regions x 3 top values). For SpCas9, the shape is `1368 x 18`.
 
 - `cp_raw_on_cas_nuc`: This has the same structure as `cp_raw_cas_nuc` (`N x 18`) but contains the top 3 raw contact probabilities for the corresponding **on-target** predictions.
 
 - `y_g3`: This is the target variable for the model. It represents the measured off-target editing efficiency, categorized into three classes: 1, 2, and 3.
+
+Note: The data structure and key names are consistent across all types of complexes when running ContactSeek.
 
 ### 4.2 Identifying Contact Residues
 
@@ -389,6 +391,20 @@ contact_residue_cas9 = find_contact_residues(
     merge_cp_diff_list,
     min_cp_threshold=0.15,
     min_diff_threshold=0.1
+)
+```
+
+For the TadA8e-RNA and A3A-RNA complexes, there is no corresponding on-target data available for computing ΔCP. Therefore, `cp_diff_data_list` should be set to `None`:
+
+```python
+from ContactSeek.FindContactResidue import find_contact_residues
+
+contact_residue_a3a = find_contact_residues(
+    merge_cp_raw_list, 
+    cp_diff_data_list=None, 
+    min_cp_threshold=0.01, # select all residues with CP over 0
+    protein_name="APOBEC3A",
+    verbose=False
 )
 ```
 
@@ -417,6 +433,30 @@ fig = plot_contact_region_correlation(
     region_start=660,
     region_end=1000,
     protein_name="Cas9",
+    figsize=(10, 10)
+)
+```
+
+The calling convention is similar for other complexes. For example, the A3A-RNA complex analysis:
+
+```python
+# Identification of Consensus Contact Regions (CCRs)
+corr_matrix_a3a, kept_indices_a3a, contact_regions_a3a = find_consensus_contact_regions(
+    data_list_a3a,
+    contact_residue_a3a,
+    correlation_threshold=0.6,
+    band_width=7,
+    max_merge_iterations=10,
+    protein_name='APOBEC3A'
+)
+
+fig = plot_contact_region_correlation(
+    corr_matrix_a3a, 
+    kept_indices_a3a, 
+    contact_regions_a3a,
+    region_start=1, 
+    region_end=199,
+    protein_name="APOBEC3A",
     figsize=(10, 10)
 )
 ```
@@ -461,9 +501,33 @@ print(ccr_df.iloc[:5,])
 4         5      76         7  1050-1058   0.028439    0.730577    1050I,1051T,1052L,1053A,1054N,1055G,1056E,1057...
 ```
 
+For the TadA8e-RNA and A3A-RNA complexes, since there is no corresponding on-target data for computing ΔCP, the `use_diff` parameter should be set to `False` during model analysis. Additionally, when performing CCR ranking, the feature dimensions should be configured accordingly. For example, for the A3A-RNA analysis:
+
+```python
+# Scoring & Ranking CCRs
+models_a3a, results_a3a = main_analysis(
+    data_list_a3a,
+    contact_residue_a3a,
+    use_topn_raw=True,
+    use_diff=False,
+    adapt_param_grid=True,
+    model_performance_log=False
+)
+
+# Rank the CCRs based on their scores [with only CP, no delta CP values]
+ccr_df_a3a = ranking_consensus_contact_region_split(
+    contact_regions_a3a,
+    models_a3a,
+    contact_residue_a3a,
+    protein_sequence=SEQ_AA_DICT["apobec3a"],
+    cp_raw_feature_count=9, 
+    cp_diff_feature_count=0
+)
+```
+
 ### 4.5 Calculating Residue-level Contact Enhancement
 
-Finally, we quantified a "contact enhancement".
+Finally, we quantify a "contact enhancement" metric for each residue.
 
 ```Python
 from ContactSeek.ContactEnhancement import residue_contact_enhancement
@@ -498,7 +562,31 @@ print(contact_enhance_df.iloc[150:160,])
 159            928         928T         65  923-931                1.3655             0.79
 ```
 
-## 5. Authors and Contact
+Similarly, for complexes without an on-target reference, the relevant parameters must be explicitly configured during the function call:
+
+```python
+# Calculation of contact enhancement at residue level [without on-target as reference]
+contact_enhance_df_a3a = residue_contact_enhancement(
+    data_list=data_list_a3a,
+    keep_residues=contact_residue_a3a,
+    models=models_a3a,
+    protein_sequence=SEQ_AA_DICT["apobec3a"],
+    ccr_ranking_df=ccr_df_a3a,
+    protein_name="A3A",
+    has_ref=False,
+    cp_raw_feature_count=9,   
+    cp_diff_feature_count=0,  
+    cp_raw_top_num=3
+)
+```
+
+## 5. Calculating CP Values from AF3 Embedding Files
+
+In addition to the `_confidences.json` file generated by each AF3 prediction (which contains the contact probability information), CP values can also be computed directly from the AF3 embedding files and model weights. The model weights must be requested from the DeepMind team: https://github.com/google-deepmind/alphafold3/blob/main/WEIGHTS_TERMS_OF_USE.md
+
+The script `./src/cal_contact_prob_from_embedding.py` can be used to perform this computation. The required embedding files are provided in the `./data/embeddings` directory.
+
+## 6. Authors and Contact
 
 - **MENG Haowei**: menghaowei AT gmail.com
 
@@ -506,6 +594,6 @@ print(contact_enhance_df.iloc[150:160,])
 
 - **Supervisor Prof. YI Chengqi**: chengqi.yi AT pku.edu.cn
 
-## 6. License
+## 7. License
 
 This project is licensed under the **MIT License**.

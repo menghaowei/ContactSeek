@@ -120,6 +120,7 @@ def identify_contact_regions(corr_matrix, kept_indices,
                              band_width=5,
                              min_internal_corr=0.3,
                              compatible_with_rf=True,
+                             use_abs=False,
                              verbose=True):
     """
     Identify contact regions based on correlation matrix analysis.
@@ -214,12 +215,13 @@ def identify_contact_regions(corr_matrix, kept_indices,
                 
             # Calculate average correlation after adding new residue
             test_indices = region_indices + [j]
-            avg_corr = calculate_region_correlation(test_indices, corr_matrix)
+            avg_corr = calculate_region_correlation(test_indices, corr_matrix, use_abs=use_abs)
             
             # Check correlation with current region
             corr_with_region = []
             for idx in region_indices:
-                corr_with_region.append(abs(corr_matrix[idx, j]))
+                corr_val = corr_matrix[idx, j]
+                corr_with_region.append(abs(corr_val) if use_abs else corr_val)
             mean_corr_with_region = np.mean(corr_with_region)
             
             # Decide whether to add
@@ -239,7 +241,7 @@ def identify_contact_regions(corr_matrix, kept_indices,
             )
             
             for sub_indices, sub_positions in sub_regions:
-                avg_corr = calculate_region_correlation(sub_indices, corr_matrix)
+                avg_corr = calculate_region_correlation(sub_indices, corr_matrix, use_abs=use_abs)
                 
                 if compatible_with_rf:
                     # RF importance compatible format
@@ -271,7 +273,7 @@ def identify_contact_regions(corr_matrix, kept_indices,
                     assigned[idx] = True
         else:
             # Normal-sized region
-            avg_corr = calculate_region_correlation(region_indices, corr_matrix)
+            avg_corr = calculate_region_correlation(region_indices, corr_matrix, use_abs=use_abs)
             
             if compatible_with_rf:
                 contact_regions.append({
@@ -452,7 +454,7 @@ def subdivide_large_region(indices, positions, corr_matrix, max_size, verbose=Fa
     return left_sub + right_sub
 
 
-def calculate_region_correlation(indices, corr_matrix):
+def calculate_region_correlation(indices, corr_matrix, use_abs=False):
     """
     Calculate average internal correlation within a region.
     
@@ -462,6 +464,9 @@ def calculate_region_correlation(indices, corr_matrix):
         List of residue indices within the region.
     corr_matrix : numpy.ndarray
         Correlation matrix.
+    use_abs : bool, default=False
+        If True, use absolute value of correlations (original behavior).
+        If False, use raw correlation values (recommended).
         
     Returns
     -------
@@ -471,6 +476,12 @@ def calculate_region_correlation(indices, corr_matrix):
     Notes
     -----
     For single-residue regions, returns 1.0.
+    
+    Recommendations:
+    - use_abs=False (recommended): Only positive correlations contribute positively.
+      Negative correlations indicate residues that change in opposite directions.
+    - use_abs=True (original): Treats all correlations by magnitude,
+      which may overestimate region coherence if negative correlations exist.
     """
     if len(indices) <= 1:
         return 1.0
@@ -478,14 +489,18 @@ def calculate_region_correlation(indices, corr_matrix):
     corr_values = []
     for i in range(len(indices)):
         for j in range(i+1, len(indices)):
-            corr_values.append(abs(corr_matrix[indices[i], indices[j]]))
+            corr_val = corr_matrix[indices[i], indices[j]]
+            if use_abs:
+                corr_values.append(abs(corr_val))
+            else:
+                corr_values.append(corr_val)
     
     return np.mean(corr_values) if corr_values else 1.0
 
 
 def merge_adjacent_singleton_regions(contact_regions, corr_matrix, 
                                      max_gap=2, merge_corr_threshold=0.4, 
-                                     max_iterations=5, verbose=True):
+                                     max_iterations=5, use_abs=False, verbose=True):
     """
     Merge adjacent singleton regions based on correlation and proximity.
     
@@ -547,7 +562,7 @@ def merge_adjacent_singleton_regions(contact_regions, corr_matrix,
         
         # Perform one round of merging
         merged_regions, merge_log = merge_adjacent_regions_single_pass(
-            current_regions, corr_matrix, max_gap, merge_corr_threshold, verbose=False
+            current_regions, corr_matrix, max_gap, merge_corr_threshold, use_abs=use_abs, verbose=False
         )
         
         # If no new merges, stop iteration
@@ -592,7 +607,7 @@ def merge_adjacent_singleton_regions(contact_regions, corr_matrix,
     return current_regions, all_merge_logs
 
 
-def merge_adjacent_regions_single_pass(contact_regions, corr_matrix, max_gap, merge_corr_threshold, verbose=False):
+def merge_adjacent_regions_single_pass(contact_regions, corr_matrix, max_gap, merge_corr_threshold, use_abs=False, verbose=False):
     """
     Perform a single pass of adjacent region merging.
     
@@ -655,7 +670,8 @@ def merge_adjacent_regions_single_pass(contact_regions, corr_matrix, max_gap, me
             for region in merge_candidates:
                 for idx1 in region['indices']:
                     for idx2 in next_region['indices']:
-                        inter_corr.append(abs(corr_matrix[idx1, idx2]))
+                        corr_val = corr_matrix[idx1, idx2]
+                        inter_corr.append(abs(corr_val) if use_abs else corr_val)
             
             avg_corr = np.mean(inter_corr) if inter_corr else 0
             
@@ -687,7 +703,7 @@ def merge_adjacent_regions_single_pass(contact_regions, corr_matrix, max_gap, me
                 'indices': merged_indices,
                 'positions': np.array(merged_positions),
                 'size': len(merged_indices),
-                'avg_correlation': calculate_region_correlation(merged_indices, corr_matrix),
+                'avg_correlation': calculate_region_correlation(merged_indices, corr_matrix, use_abs=use_abs),
                 'type': 'contact_region_merged',
                 'continuous': check_continuity(merged_positions),
                 'merged_from': [r['contact_region_id'] for r in merge_candidates]
@@ -881,6 +897,7 @@ def find_consensus_contact_regions(data_list, keep_residues,
                                    max_gap=2,
                                    merge_corr_threshold=0.4,
                                    max_merge_iterations=10,
+                                   use_abs=False,
                                    protein_name="Cas",
                                    verbose=False):
     """
@@ -914,6 +931,11 @@ def find_consensus_contact_regions(data_list, keep_residues,
         Minimum correlation required for merging regions.
     max_merge_iterations : int, default=5
         Maximum number of merge iterations.
+    use_abs : bool, default=False
+        If True, use absolute value when calculating avg_correlation (original behavior).
+        If False, use raw correlation values (recommended).
+        This parameter affects all correlation calculations during region identification
+        and merging. See calculate_region_correlation() for detailed explanation.
     protein_name : str, default="Cas"
         Protein name for display purposes.
     verbose : bool, default=True
@@ -1007,6 +1029,7 @@ def find_consensus_contact_regions(data_list, keep_residues,
         band_width=band_width,
         min_internal_corr=min_internal_corr,
         compatible_with_rf=True,
+        use_abs=use_abs,
         verbose=verbose
     )
     
@@ -1020,6 +1043,7 @@ def find_consensus_contact_regions(data_list, keep_residues,
             max_gap=max_gap,
             merge_corr_threshold=merge_corr_threshold,
             max_iterations=max_merge_iterations,
+            use_abs=use_abs,
             verbose=verbose
         )
     else:
@@ -1050,3 +1074,196 @@ def find_consensus_contact_regions(data_list, keep_residues,
         print("="*70 + "\n")
     
     return corr_matrix, kept_indices, contact_regions
+
+# ===================== NEW: Update Correlation with New Data =====================
+def update_cor_with_data_list(contact_residue, contact_regions, new_data_list, 
+                               protein_name="Cas", use_abs=False, verbose=True):
+    """
+    Update correlation matrix and region correlations with new data while preserving region structure.
+    
+    This function recalculates the correlation matrix and avg_correlation for each region
+    based on new data, while keeping the region definitions (cluster_id, contact_region_id, 
+    indices, positions, size, etc.) unchanged.
+    
+    Parameters
+    ----------
+    contact_residue : numpy.ndarray
+        Boolean array indicating which residues are contact residues (same as keep_residues).
+        Shape: (n_total_residues,)
+    contact_regions : list of dict
+        Existing contact regions with their structure. Each dict should contain:
+        - 'cluster_id': Region identifier
+        - 'contact_region_id': Region identifier
+        - 'indices': List of residue indices within correlation matrix
+        - 'positions': Array of residue positions (0-based protein sequence)
+        - 'size': Number of residues in the region
+        - 'type': Region type
+        - 'continuous': Boolean indicating spatial continuity
+        - Any other metadata fields
+    new_data_list : list of dict
+        List containing new data dictionaries (same format as original data_list).
+        Each dict must contain 'y_g3' and 'cp_raw_cas_nuc' keys.
+    protein_name : str, default="Cas"
+        Protein name for display purposes.
+    use_abs : bool, default=False
+        If True, use absolute value when calculating avg_correlation (original behavior).
+        If False, use raw correlation values (recommended for measuring true coherence).
+        See calculate_region_correlation() docstring for detailed explanation.
+    verbose : bool, default=True
+        If True, print detailed progress and statistics.
+        
+    Returns
+    -------
+    new_corr_matrix : numpy.ndarray
+        Updated correlation matrix of shape (n_kept, n_kept).
+    new_contact_regions : list of dict
+        Updated contact regions with recalculated avg_correlation values.
+        All structural information (cluster_id, indices, positions, size, type, etc.)
+        remains unchanged from the input contact_regions.
+        
+    Notes
+    -----
+    - Region structure (IDs, indices, positions, sizes) is preserved exactly
+    - Only avg_correlation values are recalculated based on new data
+    - The correlation matrix is recalculated using the same residues
+    - All metadata fields in contact_regions are preserved
+    
+    Recommendations
+    ---------------
+    - use_abs=False (recommended): Measures true internal coherence of regions.
+      Negative correlations will lower the avg_correlation, indicating residues
+      that change in opposite directions don't belong in the same functional region.
+    - use_abs=True: Matches original code behavior. Treats correlation magnitude
+      regardless of sign, which may overestimate region coherence.
+    
+    Examples
+    --------
+    >>> # Update correlations with new experimental data (recommended)
+    >>> new_corr, new_regions = update_cor_with_data_list(
+    ...     contact_residue_cas9,
+    ...     contact_regions_cas9,
+    ...     new_data_list_cas9,
+    ...     protein_name="Cas9",
+    ...     use_abs=False,  # Use raw correlations
+    ...     verbose=True
+    ... )
+    
+    >>> # Match original behavior
+    >>> new_corr, new_regions = update_cor_with_data_list(
+    ...     contact_residue_cas9,
+    ...     contact_regions_cas9,
+    ...     new_data_list_cas9,
+    ...     use_abs=True,  # Use absolute values like original
+    ...     verbose=True
+    ... )
+    
+    >>> # Compare correlations before and after
+    >>> for old_r, new_r in zip(contact_regions_cas9, new_regions):
+    ...     print(f"Region {old_r['contact_region_id']}: "
+    ...           f"{old_r['avg_correlation']:.3f} -> {new_r['avg_correlation']:.3f}")
+    """
+    
+    if verbose:
+        print("="*70)
+        print(f"UPDATING CORRELATION MATRIX WITH NEW DATA FOR {protein_name}")
+        print("="*70)
+        print(f"\nInput regions: {len(contact_regions)}")
+        print(f"Contact residues: {np.sum(contact_residue)}")
+        print(f"New data samples: {sum(len(d['y_g3']) for d in new_data_list)}")
+        print(f"Use absolute value: {use_abs}")
+        print()
+    
+    # Step 1: Calculate new correlation matrix using the same residues
+    if verbose:
+        print("Step 1: Calculating new correlation matrix...")
+    
+    new_corr_matrix, kept_indices = calculate_residue_correlation_matrix(
+        new_data_list,
+        contact_residue,
+        protein_name=protein_name,
+        verbose=verbose
+    )
+    
+    # Step 2: Update avg_correlation for each region while preserving structure
+    if verbose:
+        print("\nStep 2: Updating avg_correlation for each region...")
+    
+    new_contact_regions = []
+    
+    for region in contact_regions:
+        # Create a copy of the region to preserve all fields
+        updated_region = region.copy()
+        
+        # Get the indices for this region
+        region_indices = region['indices']
+        
+        # Recalculate avg_correlation using the same method as original code
+        new_avg_corr = calculate_region_correlation(region_indices, new_corr_matrix, use_abs=use_abs)
+        
+        # Update only the avg_correlation field
+        updated_region['avg_correlation'] = new_avg_corr
+        
+        new_contact_regions.append(updated_region)
+    
+    if verbose:
+        print(f"  Updated {len(new_contact_regions)} regions")
+        
+        # Print correlation statistics
+        old_corrs = [r['avg_correlation'] for r in contact_regions]
+        new_corrs = [r['avg_correlation'] for r in new_contact_regions]
+        
+        print(f"\nCorrelation statistics comparison:")
+        print(f"  Original - Mean: {np.mean(old_corrs):.3f}, "
+              f"Std: {np.std(old_corrs):.3f}, "
+              f"Range: [{np.min(old_corrs):.3f}, {np.max(old_corrs):.3f}]")
+        print(f"  Updated  - Mean: {np.mean(new_corrs):.3f}, "
+              f"Std: {np.std(new_corrs):.3f}, "
+              f"Range: [{np.min(new_corrs):.3f}, {np.max(new_corrs):.3f}]")
+        
+        # Show largest changes
+        corr_changes = [new - old for old, new in zip(old_corrs, new_corrs)]
+        max_change_idx = np.argmax(np.abs(corr_changes))
+        
+        print(f"\nLargest correlation change:")
+        print(f"  Region {contact_regions[max_change_idx]['contact_region_id']}: "
+              f"{old_corrs[max_change_idx]:.3f} -> {new_corrs[max_change_idx]:.3f} "
+              f"(Δ = {corr_changes[max_change_idx]:+.3f})")
+        
+        print("="*70 + "\n")
+    
+    return new_corr_matrix, new_contact_regions
+
+
+def export_correlation_matrix(corr_matrix, kept_indices, output_path="correlation_matrix.tsv"):
+    """
+    导出相关性矩阵为TSV格式，包含行名和列名
+    
+    Parameters:
+    -----------
+    corr_matrix : numpy.ndarray
+        相关性矩阵
+    kept_indices : numpy.ndarray
+        保留残基的索引
+    output_path : str
+        输出文件路径
+    """
+    import pandas as pd
+    
+    # 创建1-based的残基索引作为行名和列名
+    residue_names = [str(idx + 1) for idx in kept_indices]
+    
+    # 创建DataFrame
+    df = pd.DataFrame(
+        corr_matrix,
+        columns=residue_names
+    )
+
+    df.insert(0, "resi_index", residue_names)
+    
+    # 保存为TSV
+    df.to_csv(output_path, sep='\t', index=False)
+    print(f"Correlation matrix saved to: {output_path}")
+    print(f"Matrix shape: {corr_matrix.shape}")
+    print(f"Correlation range: [{corr_matrix.min():.3f}, {corr_matrix.max():.3f}]")
+    
+    return df
